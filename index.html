@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Hearing Test</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div id="container">
+    <h1>Online Hearing Test</h1>
+    <div id="mode-select">
+       <h2>Choose Your Test Mode</h2>
+       <button onclick="startTest('both')">🔊 No Headphones</button>
+       <button onclick="startTest('headphones')">🎧 Headphones (Left & Right)</button>
+    </div>
+    <div id="test-area" style="display: none;">
+      <p><em>Click "Play", then tell us if you can hear the sound. This helps check your hearing sensitivity at different tones.</em></p>
+      <p id="question">Press play to start the test</p>
+      <audio id="tone" controls></audio><br>
+      <button onclick="recordResponse(true)">Yes</button>
+      <button onclick="recordResponse(false)">No</button>
+    </div>
+
+    <!-- Results will appear here -->
+    <!-- Always-visible summary -->
+    <section id="summary-section" style="display: none; margin-top: 2rem;">
+    <h2>Hearing Test Summary</h2>
+    <p id="summary-text" style="font-size: 1.1rem; padding: 1rem;"></p>
+    </section>
+
+    <!-- Expandable detailed section -->
+    <details id="results-detail" style="display: none;">
+    <summary><h3>See Detailed Results (Table & Audiogram)</h3></summary>
+
+    <div style="margin-top: 1rem;">
+        <table id="results-table">
+        <tr><th>Frequency (Hz)</th><th>Volume (dB)</th><th>Result</th></tr>
+        </table>
+
+        <h3>Audiogram</h3>
+        <canvas id="audiogramChart" width="600" height="400"></canvas>
+    </div>
+    </details>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
