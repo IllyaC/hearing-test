@@ -1,7 +1,155 @@
-
 let index = 0, results = [];
 let testMode = 'both'; // 'both', 'left', or 'right'
 let tones = [];
+
+// dB HL Testing code
+
+// Calibration constant (RETSPL value) mapping SPL to HL for a specific piece of hearing equipment (which SPL equals 0 HL)
+// Can be roughly approximated by obtaining ISO RETSPL for similar equipment
+const CAL_RETSPL_1K = 7.5;
+
+// Calibration constant for the user's entire equipment setup
+// Represents actual volume (dB SPL) output on the user's end when A=1.0 (0 dBFS)
+// Can possibly be roughly measured with smartphone app
+const CAL_SPL0_1K   = 96.0;
+
+// Final (complete) calibration constant
+// Maps A=1.0 (0 dBFS) tone in the software to a dB HL value
+const K_1K = CAL_SPL0_1K - CAL_RETSPL_1K;
+
+// Tone duration
+const DBHL_DURATION_SEC = 1.0;
+
+let audioCtx = null;
+
+function dbfsToAmp(dbfs) {
+  const amp = Math.pow(10, dbfs / 20);
+  return Math.max(0, Math.min(1, amp));
+}
+function ampToHL1k(A) {
+  if (A <= 0) return -Infinity;
+  return 20 * Math.log10(A) + K_1K;
+}
+
+async function playSineBuffer(freqHz, dbfs, durationSec) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch(e) {} }
+
+  const sr = audioCtx.sampleRate;
+  const n  = Math.max(1, Math.floor(durationSec * sr));
+  const buf = audioCtx.createBuffer(1, n, sr);
+  const ch0 = buf.getChannelData(0);
+
+  const amp = dbfsToAmp(dbfs);
+  const twoPiF = 2 * Math.PI * freqHz;
+
+  for (let i = 0; i < n; i++) ch0[i] = amp * Math.sin(twoPiF * (i / sr));
+
+  // 5 ms fade in/out
+  const k = Math.min(n, Math.floor(0.005 * sr));
+  for (let i = 0; i < k; i++) {
+    const g = i / k;
+    ch0[i] *= g;
+    ch0[n - 1 - i] *= g;
+  }
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+  src.start();
+  await new Promise(res => (src.onended = res));
+}
+
+// dB HL state
+let dbhlCurrentDbfs = -90;
+let dbhlRunning = false;
+
+async function playDbHlTone() {
+  const statusEl = document.getElementById("dbhl-status");
+  statusEl.textContent = `Playing 1 kHz @ ${dbhlCurrentDbfs.toFixed(2)} dBFS for ${DBHL_DURATION_SEC.toFixed(1)} s…`;
+  await playSineBuffer(1000, dbhlCurrentDbfs, DBHL_DURATION_SEC);
+  statusEl.textContent = `Last level: ${dbhlCurrentDbfs.toFixed(2)} dBFS`;
+
+  // Log each tone played
+  const log = document.getElementById("dbhl-log");
+  if (log) {
+    log.textContent += `Played 1 kHz @ ${dbhlCurrentDbfs.toFixed(2)} dBFS\n`;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+function startDbHlTest() {
+  // Only show the dB HL Testing area
+  document.getElementById("mode-select").style.display = "none";
+  document.getElementById("test-area").style.display = "none";
+  document.getElementById("dbhl-test-area").style.display = "block";
+
+  // Reset UI
+  document.getElementById("dbhl-result").textContent = "";
+  document.getElementById("dbhl-status").textContent = "";
+  const logEl = document.getElementById("dbhl-log");
+  if (logEl) logEl.textContent = ""; // Clear log of tones played
+  document.getElementById("dbhl-replay-row").style.display = "none";
+  document.getElementById("dbhl-response-row").style.display = "none";
+  document.getElementById("dbhl-start-row").style.display = "flex";
+
+  dbhlRunning = false;
+
+  // Begin the test on "Start Test" button click
+  document.getElementById("dbhl-start-btn").onclick = async () => {
+    const startDb = parseFloat(document.getElementById("dbhl-start").value || "-90");
+    dbhlCurrentDbfs = Math.max(-120, Math.min(0, startDb));
+
+    // Once the test has started, hide the "Start Test" button and show the test controls
+    document.getElementById("dbhl-start-row").style.display = "none";
+    document.getElementById("dbhl-response-row").style.display = "flex";
+    document.getElementById("dbhl-replay-row").style.display = "block";
+
+    dbhlRunning = true;
+    await playDbHlTone(); // First tone
+  };
+
+  // "Replay" button replays the last tone
+  document.getElementById("dbhl-replay-btn").onclick = async () => {
+    if (dbhlRunning) await playDbHlTone();
+  };
+
+  // "Yes" button ends test at current level
+  document.getElementById("dbhl-yes").onclick = () => {
+    if (!dbhlRunning) return;
+    const A  = dbfsToAmp(dbhlCurrentDbfs);
+    const hl = ampToHL1k(A);
+    document.getElementById("dbhl-result").textContent =
+      `Lowest audible level at 1 kHz: ${hl.toFixed(1)} dB HL (K = ${K_1K.toFixed(1)} dB).`;
+    dbhlRunning = false;
+  };
+
+  // "No" button increases volume of the next tone, but ends test if stepping would cause level to exceed 0 dBFS
+  document.getElementById("dbhl-no").onclick = async () => {
+    if (!dbhlRunning) return;
+
+    let step = parseFloat(document.getElementById("dbhl-step").value);
+    if (!Number.isFinite(step) || step <= 0) step = 2.0;
+
+    const proposed = dbhlCurrentDbfs + step;
+
+    if (proposed >= 0) {
+      // Clamp to 0 dBFS and end test (can't go louder without clipping)
+      dbhlCurrentDbfs = 0;
+      const A  = dbfsToAmp(dbhlCurrentDbfs);
+      const hl = ampToHL1k(A);
+      document.getElementById("dbhl-result").textContent =
+        `Lowest audible level at 1 kHz (at full scale): ${hl.toFixed(1)} dB HL (K = ${K_1K.toFixed(1)} dB).`;
+      dbhlRunning = false;
+    } else {
+      // Step and play next louder tone automatically
+      dbhlCurrentDbfs = proposed;
+      await playDbHlTone();
+    }
+  };
+}
+
+// End of dB HL Testing code
 
 function startTest(mode) {
   testMode = mode;
