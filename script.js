@@ -151,6 +151,21 @@ function startDbHlTest() {
 
 // End of dB HL Testing code
 
+function calibrationTest() {
+
+    document.getElementById("calibrationTestAudio").src = `audio/250Hz_40dB.wav`;
+    document.getElementById("calibrationTestAudio").style.display = "block";
+
+}
+
+function proceedToTest() {
+
+    //User is finished with Calibration, display the test modes.
+    document.getElementById("calibration-page").style.display = "none";
+    document.getElementById("mode-select").style.display = "block";
+
+}
+
 function startTest(mode) {
   testMode = mode;
   document.getElementById("summary-section").style.display = "none";
